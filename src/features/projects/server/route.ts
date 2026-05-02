@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { Hono } from "hono";
-import { ID, Query } from "node-appwrite";
+import { ID, Query, type Databases } from "node-appwrite";
 import { zValidator } from "@hono/zod-validator";
 import { sessionMiddleware } from "@/lib/session-middleware";
 
-import { getMember, isSuperAdmin } from "@/features/members/utilts";
+import { getMember, getProjectAccess, isSuperAdmin } from "@/features/members/utilts";
 import {
   DATABASE_ID,
   IMAGES_BUCKET_ID,
@@ -29,11 +29,14 @@ import {
   createRepository,
   getAccessToken,
   getInstallationToken,
+  getRepository,
   deleteRepository,
   getAuthenticatedUser,
   addCollaborator,
   listRepositoryIssues
 } from "@/lib/github-api";
+
+import { checkSubscriptionLimit } from "@/features/subscriptions/utils";
 import { listInstallationRepos } from "@/lib/github-app";
 import { WORKSPACE_ID } from "@/config";
 
@@ -43,6 +46,31 @@ const extractRepoName = (githubUrl: string): string => {
   // Get the last segment and remove .git
   const repoName = segments[segments.length - 1].replace(".git", "");
   return repoName;
+};
+
+const getProjectContext = async ({
+  databases,
+  userId,
+  projectId,
+}: {
+  databases: Databases;
+  userId: string;
+  projectId: string;
+}) => {
+  const project = await databases.getDocument<Project>(
+    DATABASE_ID,
+    PROJECTS_ID,
+    projectId,
+  );
+
+  const access = await getProjectAccess({
+    databases,
+    userId,
+    workspaceId: project.workspaceId,
+    projectId,
+  });
+
+  return { project, access };
 };
 
 const app = new Hono()
@@ -65,6 +93,29 @@ const app = new Hono()
 
       if (!member) {
         return c.json({ error: "Unauthorized" }, 401);
+      }
+
+      // Check project limit
+      const limitCheck = await checkSubscriptionLimit({
+        databases,
+        userId: user.$id,
+        limitType: "projects",
+        workspaceId,
+      });
+
+      if (!limitCheck.allowed) {
+        return c.json(
+          {
+            error: "Project limit reached",
+            details: {
+              limit: limitCheck.limit,
+              current: limitCheck.current,
+              plan: limitCheck.plan,
+              message: `You have reached the maximum number of projects (${limitCheck.limit}) for your ${limitCheck.plan} plan in this workspace. Please upgrade to create more projects.`,
+            },
+          },
+          403
+        );
       }
 
       // Get GitHub OAuth access token from user profile
@@ -162,8 +213,32 @@ const app = new Hono()
         return c.json({ error: "Unauthorized" }, 401);
       }
 
+      // Check project limit
+      const limitCheck = await checkSubscriptionLimit({
+        databases,
+        userId: user.$id,
+        limitType: "projects",
+        workspaceId,
+      });
+
+      if (!limitCheck.allowed) {
+        return c.json(
+          {
+            error: "Project limit reached",
+            details: {
+              limit: limitCheck.limit,
+              current: limitCheck.current,
+              plan: limitCheck.plan,
+              message: `You have reached the maximum number of projects (${limitCheck.limit}) for your ${limitCheck.plan} plan in this workspace. Please upgrade to import more projects.`,
+            },
+          },
+          403
+        );
+      }
+
       let repoName: string;
       let repoOwner: string;
+      let validationToken: string | null = null;
 
       if (repoFullName) {
         // GitHub App flow: "owner/repo"
@@ -173,39 +248,45 @@ const app = new Hono()
         }
         repoOwner = ownerPart;
         repoName = namePart;
+
+        validationToken = await getInstallationToken(workspaceId);
+        if (!validationToken) {
+          return c.json({
+            error: "GitHub App not connected to this workspace. Please connect GitHub in workspace settings.",
+          }, 400);
+        }
       } else {
-        // Legacy PAT flow: full GitHub URL
+        // Legacy PAT flow: full GitHub URL requires user OAuth token
         const githubToken = await getAccessToken(user.$id);
 
         if (!githubToken) {
-          // Try installation token as fallback
-          const installToken = await getInstallationToken(workspaceId);
-          if (!installToken) {
-            return c.json({
-              error: "GitHub account not connected. Please connect GitHub in workspace settings or sign in with GitHub.",
-            }, 400);
-          }
+          return c.json({
+            error: "GitHub account not connected. Please sign in with GitHub to add projects.",
+          }, 400);
         }
 
+        validationToken = githubToken;
+
+        // Extract owner and repo name directly from the URL
+        const segments = projectLink!.split("/");
+        repoOwner = segments[segments.length - 2] || "";
+        if (!repoOwner) {
+          return c.json({ error: "Could not determine repository owner from URL" }, 400);
+        }
         repoName = extractRepoName(projectLink!);
-
-        const githubToken2 = await getAccessToken(user.$id);
-        if (githubToken2) {
-          const githubUser = await getAuthenticatedUser(githubToken2);
-          if (!githubUser) {
-            return c.json({ error: "Failed to authenticate with GitHub" }, 500);
-          }
-          repoOwner = githubUser.login;
-        } else {
-          // Extract owner from URL
-          const segments = projectLink!.split("/");
-          repoOwner = segments[segments.length - 2] || "";
-          if (!repoOwner) {
-            return c.json({ error: "Could not determine repository owner from URL" }, 400);
-          }
-        }
       }
 
+      // Validate repository exists and is accessible BEFORE creating project
+      try {
+        await getRepository(validationToken, repoOwner, repoName);
+      } catch (error) {
+        console.error("Failed to fetch repository:", error);
+        return c.json({
+          error: "Failed to access repository. Please check if the repository exists and you have access to it."
+        }, 400);
+      }
+
+      // Now create the project only if repository is accessible
       const project = await databases.createDocument(
         DATABASE_ID,
         PROJECTS_ID,
@@ -219,63 +300,64 @@ const app = new Hono()
         },
       );
 
-      // Use installation token if available, otherwise fall back to user token
-      const tokenForSync =
-        (await getInstallationToken(workspaceId)) ||
-        (await getAccessToken(user.$id));
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let data: any[] = [];
-      if (tokenForSync) {
-        try {
-          data = await listRepositoryIssues(tokenForSync, repoOwner, repoName);
-        } catch {
-          // Non-fatal: project was created, just couldn't sync initial issues
-        }
-      }
-
-      const status = IssueStatus.TODO;
-
-      const highestPositionTask = await databases.listDocuments(
-        DATABASE_ID,
-        ISSUES_ID,
-        [
-          Query.equal("status", status),
-          Query.equal("workspaceId", workspaceId),
-          Query.orderAsc("position"),
-          Query.limit(1),
-        ],
-      );
-
-      const newPosition =
-        highestPositionTask.documents.length > 0
-          ? highestPositionTask.documents[0].position + 1000
-          : 1000;
-
-      // Create all issues in parallel instead of sequentially
-      await Promise.all(
-        data.map((issue) =>
-          databases.createDocument(DATABASE_ID, ISSUES_ID, ID.unique(), {
-            name: issue.title,
-            description: issue.body,
-            status,
-            dueDate: new Date().toISOString(),
-            workspaceId,
-            projectId: project.$id,
-            assigneeId: issue?.assignee?.login,
-            position: newPosition,
-            number: issue.number,
-          })
-        )
-      );
-
       // Update member's projectId array (keep existing workspace role)
       const currentProjectIds = member.projectId || [];
       await databases.updateDocument(DATABASE_ID, MEMBERS_ID, member.$id, {
         projectId: [...currentProjectIds, project.$id],
       });
 
-      return c.json({ data: project, issues: data });
+      // Import issues asynchronously in the background (non-blocking)
+      (async () => {
+        try {
+          const issues = await listRepositoryIssues(validationToken!, repoOwner, repoName);
+          if (issues.length === 0) return;
+
+          const status = IssueStatus.TODO;
+          const highestPositionTask = await databases.listDocuments(
+            DATABASE_ID,
+            ISSUES_ID,
+            [
+              Query.equal("status", status),
+              Query.equal("workspaceId", workspaceId),
+              Query.orderAsc("position"),
+              Query.limit(1),
+            ],
+          );
+
+          const newPosition =
+            highestPositionTask.documents.length > 0
+              ? highestPositionTask.documents[0].position + 1000
+              : 1000;
+
+          const BATCH_SIZE = 25;
+          for (let i = 0; i < issues.length; i += BATCH_SIZE) {
+            const batch = issues.slice(i, i + BATCH_SIZE);
+            await Promise.all(
+              batch.map((issue) =>
+                databases.createDocument(DATABASE_ID, ISSUES_ID, ID.unique(), {
+                  name: issue.title,
+                  description: issue.body,
+                  status,
+                  dueDate: new Date().toISOString(),
+                  workspaceId,
+                  projectId: project.$id,
+                  assigneeId: issue?.assignee?.login,
+                  position: newPosition,
+                  number: issue.number,
+                })
+              )
+            );
+          }
+          console.log(`Successfully imported ${issues.length} issues for project ${project.$id}`);
+        } catch (error) {
+          console.error(`Failed to import issues for project ${project.$id}:`, error);
+        }
+      })();
+
+      return c.json({
+        data: project,
+        message: "Project created successfully. Issues are being imported in the background.",
+      });
     },
   )
   // ── List repos accessible to the workspace GitHub App installation ──────────
@@ -414,26 +496,14 @@ const app = new Hono()
     const user = c.get("user");
     const { projectId } = c.req.param();
 
-    const project = await databases.getDocument<Project>(
-      DATABASE_ID,
-      PROJECTS_ID,
+    const { project, access } = await getProjectContext({
+      databases,
+      userId: user.$id,
       projectId,
-    );
+    });
 
-    // Check if user is a super admin
-    const isSuper = await isSuperAdmin({ databases, userId: user.$id });
-
-    if (!isSuper) {
-      // Regular users need to be members of the workspace
-      const member = await getMember({
-        databases,
-        workspaceId: project.workspaceId,
-        userId: user.$id,
-      });
-
-      if (!member) {
-        return c.json({ error: "Unauthorized" }, 401);
-      }
+    if (!access.hasAccess) {
+      return c.json({ error: "Forbidden" }, 403);
     }
 
     return c.json({ data: project });
@@ -443,27 +513,20 @@ const app = new Hono()
     const user = c.get("user");
     const { projectId } = c.req.param();
 
-    const project = await databases.getDocument<Project>(
-      DATABASE_ID,
-      PROJECTS_ID,
+    const { access } = await getProjectContext({
+      databases,
+      userId: user.$id,
       projectId,
-    );
-
-    // Check if user is a super admin
-    const isSuper = await isSuperAdmin({ databases, userId: user.$id });
+    });
 
     let member = null;
 
-    if (!isSuper) {
-      // Regular users need to be members of the workspace
-      member = await getMember({
-        databases,
-        workspaceId: project.workspaceId,
-        userId: user.$id,
-      });
-      if (!member) {
-        return c.json({ error: "Unauthorized" }, 401);
-      }
+    if (!access.hasAccess) {
+      return c.json({ error: "Forbidden" }, 403);
+    }
+
+    if (!access.isSuperAdmin) {
+      member = access.member;
     } else {
       // For super admins, we need to get a member record for analytics
       // We'll use the first member record we can find for this user
@@ -472,7 +535,14 @@ const app = new Hono()
         MEMBERS_ID,
         [Query.equal("userId", user.$id), Query.limit(1)],
       );
-      member = memberRecords.documents[0];
+      member = memberRecords.documents[0] ?? null;
+      if (!member) {
+        return c.json({ error: "No member record found for analytics" }, 404);
+      }
+    }
+
+    if (!member) {
+      return c.json({ error: "Unable to resolve analytics member context" }, 403);
     }
 
     const now = new Date();
@@ -614,19 +684,14 @@ const app = new Hono()
       const { projectId } = c.req.param();
       const { name, image } = c.req.valid("form");
 
-      const existingProject = await databases.getDocument<Project>(
-        DATABASE_ID,
-        PROJECTS_ID,
-        projectId,
-      );
-      const member = await getMember({
+      const { access } = await getProjectContext({
         databases,
-        workspaceId: existingProject.workspaceId,
         userId: user.$id,
+        projectId,
       });
 
-      if (!member) {
-        return c.json({ error: "Unauthorized" }, 401);
+      if (!access.hasAccess) {
+        return c.json({ error: "Forbidden" }, 403);
       }
 
       let uploadedImage: string | undefined;
@@ -646,7 +711,7 @@ const app = new Hono()
       } else {
         uploadedImage = image;
       }
-      const updatedProject = await databases.updateDocument(
+      const updatedProject = await databases.updateDocument<Project>(
         DATABASE_ID,
         PROJECTS_ID,
         projectId,
@@ -664,22 +729,15 @@ const app = new Hono()
     const user = c.get("user");
     const { projectId } = c.req.param();
 
-    const existingProject = await databases.getDocument<Project>(
-      DATABASE_ID,
-      PROJECTS_ID,
+    const { project: existingProject, access } = await getProjectContext({
+      databases,
+      userId: user.$id,
       projectId,
-    );
+    });
 
-    // Check if user is a super admin
-    const isSuper = await isSuperAdmin({ databases, userId: user.$id });
-
-    if (!isSuper) {
+    if (!access.isSuperAdmin) {
       // Regular users need to be workspace admins or project admins
-      const member = await getMember({
-        databases,
-        workspaceId: existingProject.workspaceId,
-        userId: user.$id,
-      });
+      const member = access.member;
 
       if (!member) {
         return c.json({ error: "Unauthorized access to workspace" }, 401);
@@ -713,12 +771,8 @@ const app = new Hono()
     if (projectMembers.total > 0) {
       // Allow workspace admin, project admin, or super admin to delete project with members
       // This removes all member associations automatically
-      if (!isSuper) {
-        const member = await getMember({
-          databases,
-          workspaceId: existingProject.workspaceId,
-          userId: user.$id,
-        });
+      if (!access.isSuperAdmin) {
+        const member = access.member;
 
         const canDeleteWithMembers =
           member?.role === MemberRole.ADMIN || // Workspace admin
@@ -794,17 +848,12 @@ const app = new Hono()
 
       const { username } = c.req.valid("json");
 
-      const existingProject = await databases.getDocument<Project>(
-        DATABASE_ID,
-        PROJECTS_ID,
-        projectId,
-      );
-
-      const member = await getMember({
+      const { project: existingProject, access } = await getProjectContext({
         databases,
-        workspaceId: existingProject.workspaceId,
         userId: user.$id,
+        projectId,
       });
+      const member = access.member;
 
       if (!member || existingProject.projectAdmin !== member.$id) {
         return c.json({ error: "Unauthorized" }, 401);
@@ -863,6 +912,7 @@ const app = new Hono()
     async (c) => {
       const storage = c.get("storage");
       const databases = c.get("databases");
+      const user = c.get("user");
       const { file, projectId } = c.req.valid("form");
 
       if (!file) {
@@ -870,14 +920,18 @@ const app = new Hono()
       }
 
       try {
-        const project = await databases.getDocument(
-          DATABASE_ID,
-          PROJECTS_ID,
+        const { project, access } = await getProjectContext({
+          databases,
+          userId: user.$id,
           projectId,
-        );
+        });
 
         if (!project) {
           return c.json({ error: "Project not found" }, 404);
+        }
+
+        if (!access.hasAccess) {
+          return c.json({ error: "Forbidden" }, 403);
         }
       } catch (error) {
         console.error("Error fetching project:", error);
@@ -939,13 +993,18 @@ const app = new Hono()
   )
   .get("/:projectId/info", sessionMiddleware, async (c) => {
     const databases = c.get("databases");
+    const user = c.get("user");
     const { projectId } = c.req.param();
 
-    const project = await databases.getDocument<Project>(
-      DATABASE_ID,
-      PROJECTS_ID,
+    const { project, access } = await getProjectContext({
+      databases,
+      userId: user.$id,
       projectId,
-    );
+    });
+
+    if (!access.hasAccess) {
+      return c.json({ error: "Forbidden" }, 403);
+    }
 
     return c.json({
       data: {
@@ -987,7 +1046,7 @@ const app = new Hono()
         return c.json({ error: "Unauthorized" }, 401);
       }
 
-      const project = await databases.updateDocument(
+      const project = await databases.updateDocument<Project>(
         DATABASE_ID,
         PROJECTS_ID,
         projectId,

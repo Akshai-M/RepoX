@@ -22,7 +22,6 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 
 import { useCreateWorkspace } from "../api/use-create-workspace";
-
 import { type CreateWorkspaceSchema, createWorkspaceSchema } from "../schemas";
 
 interface CreateWorkspaceFormProps {
@@ -37,8 +36,10 @@ export const CreateWorkspaceForm = ({ onCancel }: CreateWorkspaceFormProps) => {
     resolver: zodResolver(createWorkspaceSchema),
     defaultValues: {
       name: "",
+      type: "personal",
     },
   });
+
   const onSubmit = (values: CreateWorkspaceSchema) => {
     const finalValues = {
       ...values,
@@ -63,19 +64,44 @@ export const CreateWorkspaceForm = ({ onCancel }: CreateWorkspaceFormProps) => {
   };
 
   return (
-    <Card className="size-full border-none shadow-none dark:bg-slate-800">
+    <Card className="size-full border-none bg-card shadow-none backdrop-blur-xl dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.05),transparent),hsl(var(--surface-elevated))] dark:shadow-[0_22px_55px_-35px_rgba(15,23,42,0.8)]">
       <CardHeader className="flex px-7">
         <CardTitle className="text-xl font-bold">
           Create new workspace
         </CardTitle>
       </CardHeader>
       <div className="px-7">
-        <Separator className="dark:bg-slate-200" />
+        <Separator className="bg-border/55" />
       </div>
       <CardContent className="px-7 pt-6">
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)}>
             <div className="flex flex-col gap-y-6">
+              <FormField
+                control={form.control}
+                name="type"
+                render={({ field }) => (
+                  <FormItem>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["personal", "organization"] as const).map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => field.onChange(t)}
+                          className={cn(
+                            "rounded-2xl border border-transparent px-4 py-3 text-sm font-medium transition-colors",
+                            field.value === t
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "bg-background/55 text-muted-foreground hover:bg-muted/70",
+                          )}
+                        >
+                          {t === "personal" ? "Personal" : "Organization"}
+                        </button>
+                      ))}
+                    </div>
+                  </FormItem>
+                )}
+              />
               <FormField
                 control={form.control}
                 name="name"
@@ -88,7 +114,6 @@ export const CreateWorkspaceForm = ({ onCancel }: CreateWorkspaceFormProps) => {
                       <Input
                         {...field}
                         placeholder="Enter workspace name"
-                        className="border border-slate-200"
                       />
                     </FormControl>
                     <FormMessage />
@@ -115,9 +140,9 @@ export const CreateWorkspaceForm = ({ onCancel }: CreateWorkspaceFormProps) => {
                           />
                         </div>
                       ) : (
-                        <Avatar className="size-[72px]">
-                          <AvatarFallback className="bg-slate-200 dark:bg-gray-800">
-                            <ImageIcon className="size-[36px] text-black dark:text-gray-200" />
+                          <Avatar className="size-[72px]">
+                            <AvatarFallback className="bg-muted/70">
+                              <ImageIcon className="size-[36px] text-muted-foreground" />
                           </AvatarFallback>
                         </Avatar>
                       )}
@@ -139,7 +164,7 @@ export const CreateWorkspaceForm = ({ onCancel }: CreateWorkspaceFormProps) => {
                             size="sm"
                             type="button"
                             variant="destructive"
-                            className="dark:gray-200 mt-2 w-fit bg-slate-200 hover:bg-slate-300 dark:bg-gray-800"
+                            className="mt-2 w-fit"
                             disabled={isPending}
                             onClick={() => {
                               field.onChange(null);
@@ -153,7 +178,7 @@ export const CreateWorkspaceForm = ({ onCancel }: CreateWorkspaceFormProps) => {
                             size="sm"
                             type="button"
                             variant="secondary"
-                            className="dark:gray-200 mt-2 w-fit bg-slate-200 hover:bg-slate-300 dark:bg-gray-800"
+                            className="mt-2 w-fit rounded-2xl border-transparent bg-background/55"
                             disabled={isPending}
                             onClick={() => inputRef.current?.click()}
                           >
@@ -173,7 +198,7 @@ export const CreateWorkspaceForm = ({ onCancel }: CreateWorkspaceFormProps) => {
                 variant="destructive"
                 onClick={onCancel}
                 disabled={isPending}
-                className={cn(!onCancel && "invisible") + "w-1/2"}
+                className={cn(!onCancel && "invisible", "w-1/2 rounded-2xl")}
               >
                 Cancel
               </Button>
@@ -181,7 +206,7 @@ export const CreateWorkspaceForm = ({ onCancel }: CreateWorkspaceFormProps) => {
                 disabled={isPending}
                 type="submit"
                 size="lg"
-                className="w-1/2 bg-slate-200 text-black dark:bg-[#000] dark:text-gray-100"
+                className="w-1/2 rounded-2xl"
               >
                 Create workspace
               </Button>

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { sessionMiddleware } from "@/lib/session-middleware";
-import { getMember, isSuperAdmin } from "@/features/members/utilts";
+import { getProjectAccess } from "@/features/members/utilts";
 import { DATABASE_ID, PROJECTS_ID, PR_ID, AI_TESTS_ID } from "@/config";
 import { Project } from "@/features/projects/types";
 import { Octokit, RequestError } from "octokit";
@@ -19,8 +19,35 @@ import {
 import { createPrSchema } from "../schemas";
 import { ID, Query, type Databases } from "node-appwrite";
 import { AIReview } from "../types-ai";
-import { AITestGeneration, PersistedTestCase, TestType } from "../types-tests";
+import { AITestGeneration, TestStatus, TestType } from "../types-tests";
 import { analyzeWithGemini, PRAnalysisInput, generateTestCases } from "@/lib/ai-service";
+import { consumeAICredits } from "@/features/subscriptions/utils";
+import { AIFeatureCost } from "@/features/subscriptions/types";
+
+const getProjectContext = async ({
+  databases,
+  userId,
+  projectId,
+}: {
+  databases: Databases;
+  userId: string;
+  projectId: string;
+}) => {
+  const project = await databases.getDocument<Project>(
+    DATABASE_ID,
+    PROJECTS_ID,
+    projectId,
+  );
+
+  const access = await getProjectAccess({
+    databases,
+    userId,
+    workspaceId: project.workspaceId,
+    projectId,
+  });
+
+  return { project, access };
+};
 
 const app = new Hono()
   .get(
@@ -37,29 +64,22 @@ const app = new Hono()
       const user = c.get("user");
       const { workspaceId, projectId, status, search } = c.req.valid("query");
 
-      const project = await databases.getDocument<Project>(
-        DATABASE_ID,
-        PROJECTS_ID,
-        projectId
-      );
+      const { project, access } = await getProjectContext({
+        databases,
+        userId: user.$id,
+        projectId,
+      });
 
       if (!project) {
         return c.json({ error: "Project not found" }, 404);
       }
 
-      // Check if user is a super admin
-      const isSuper = await isSuperAdmin({ databases, userId: user.$id });
+      if (project.workspaceId !== workspaceId) {
+        return c.json({ error: "Project does not belong to this workspace" }, 400);
+      }
 
-      if (!isSuper) {
-        const member = await getMember({
-          databases,
-          workspaceId,
-          userId: user.$id,
-        });
-
-        if (!member) {
-          return c.json({ error: "Unauthorized" }, 401);
-        }
+      if (!access.hasAccess) {
+        return c.json({ error: "Forbidden" }, 403);
       }
 
       // Prefer installation token (workspace-level); fall back to user OAuth token
@@ -98,7 +118,6 @@ const app = new Hono()
             $createdAt: pr.created_at,
             $updatedAt: pr.updated_at,
             $mergedAt: pr.merged_at,
-
             $collectionId: "",
             $databaseId: "",
             $permissions: [],
@@ -154,29 +173,18 @@ const app = new Hono()
         );
       }
 
-      const project = await databases.getDocument<Project>(
-        DATABASE_ID,
-        PROJECTS_ID,
-        projectId
-      );
+      const { project, access } = await getProjectContext({
+        databases,
+        userId: user.$id,
+        projectId,
+      });
 
       if (!project) {
         return c.json({ error: "Project not found" }, 404);
       }
 
-      // Check if user is a super admin
-      const isSuper = await isSuperAdmin({ databases, userId: user.$id });
-
-      if (!isSuper) {
-        const member = await getMember({
-          databases,
-          workspaceId: project.workspaceId,
-          userId: user.$id,
-        });
-
-        if (!member) {
-          return c.json({ error: "Unauthorized" }, 401);
-        }
+      if (!access.hasAccess) {
+        return c.json({ error: "Forbidden" }, 403);
       }
 
       // Get GitHub OAuth access token
@@ -282,29 +290,18 @@ const app = new Hono()
       const { projectId, prNumber } = c.req.param();
 
       try {
-        const project = await databases.getDocument<Project>(
-          DATABASE_ID,
-          PROJECTS_ID,
-          projectId
-        );
+        const { project, access } = await getProjectContext({
+          databases,
+          userId: user.$id,
+          projectId,
+        });
 
         if (!project) {
           return c.json({ error: "Project not found" }, 404);
         }
 
-        // Check if user is a super admin
-        const isSuper = await isSuperAdmin({ databases, userId: user.$id });
-
-        if (!isSuper) {
-          const member = await getMember({
-            databases,
-            workspaceId: project.workspaceId,
-            userId: user.$id,
-          });
-
-          if (!member) {
-            return c.json({ error: "Unauthorized" }, 401);
-          }
+        if (!access.hasAccess) {
+          return c.json({ error: "Forbidden" }, 403);
         }
 
         // Get GitHub OAuth access token
@@ -314,6 +311,18 @@ const app = new Hono()
           return c.json({
             error: "GitHub account not connected. Cannot generate AI review."
           }, 400);
+        }
+
+        // Check and consume AI credits
+        const creditResult = await consumeAICredits({
+          databases,
+          userId: user.$id,
+          workspaceId: project.workspaceId,
+          creditsToConsume: AIFeatureCost.CODE_REVIEW,
+        });
+
+        if (!creditResult.success) {
+          return c.json({ error: creditResult.message }, 402);
         }
 
         // Start AI review analysis
@@ -340,29 +349,18 @@ const app = new Hono()
       const { projectId, prNumber } = c.req.param();
 
       try {
-        const project = await databases.getDocument<Project>(
-          DATABASE_ID,
-          PROJECTS_ID,
-          projectId
-        );
+        const { project, access } = await getProjectContext({
+          databases,
+          userId: user.$id,
+          projectId,
+        });
 
         if (!project) {
           return c.json({ error: "Project not found" }, 404);
         }
 
-        // Check if user is a super admin
-        const isSuper = await isSuperAdmin({ databases, userId: user.$id });
-
-        if (!isSuper) {
-          const member = await getMember({
-            databases,
-            workspaceId: project.workspaceId,
-            userId: user.$id,
-          });
-
-          if (!member) {
-            return c.json({ error: "Unauthorized" }, 401);
-          }
+        if (!access.hasAccess) {
+          return c.json({ error: "Forbidden" }, 403);
         }
 
         // Get GitHub OAuth access token
@@ -375,7 +373,7 @@ const app = new Hono()
         }
 
         // Check if tests were recently generated (within last 5 minutes) to prevent spamming
-        const recentTests = await databases.listDocuments<PersistedTestCase>(
+        const recentTests = await databases.listDocuments(
           DATABASE_ID,
           AI_TESTS_ID,
           [
@@ -398,6 +396,18 @@ const app = new Hono()
           }
         }
 
+        // Check and consume AI credits
+        const creditResult = await consumeAICredits({
+          databases,
+          userId: user.$id,
+          workspaceId: project.workspaceId,
+          creditsToConsume: AIFeatureCost.TEST_GENERATION,
+        });
+
+        if (!creditResult.success) {
+          return c.json({ error: creditResult.message }, 402);
+        }
+
         // Generate AI test cases
         const testGeneration = await generateAITests({
           projectId,
@@ -406,16 +416,46 @@ const app = new Hono()
           githubToken,
         });
 
-        // Persist the generated tests to database asynchronously (don't wait)
-        persistGeneratedTests(databases, testGeneration, projectId, parseInt(prNumber))
-          .catch(error => {
-            console.error("Failed to persist tests to database:", error);
-          });
-
         return c.json({ success: true, tests: testGeneration });
       } catch (error) {
         console.error("Test generation failed:", error);
         return c.json({ error: "Failed to generate test cases" }, 500);
+      }
+    }
+  )
+  .post(
+    "/:projectId/tests/:prNumber/save-generated",
+    sessionMiddleware,
+    async (c) => {
+      const databases = c.get("databases");
+      const user = c.get("user");
+      const { projectId, prNumber } = c.req.param();
+
+      const { project, access } = await getProjectContext({
+        databases,
+        userId: user.$id,
+        projectId,
+      });
+
+      if (!project) {
+        return c.json({ error: "Project not found" }, 404);
+      }
+
+      if (!access.hasAccess) {
+        return c.json({ error: "Forbidden" }, 403);
+      }
+
+      const body = await c.req.json<{ tests: AITestGeneration }>();
+      if (!body?.tests) {
+        return c.json({ error: "Missing tests data" }, 400);
+      }
+
+      try {
+        await persistGeneratedTests(databases, body.tests, projectId, parseInt(prNumber));
+        return c.json({ success: true });
+      } catch (error) {
+        console.error("Failed to save generated tests:", error);
+        return c.json({ error: "Failed to save tests" }, 500);
       }
     }
   )
@@ -428,31 +468,21 @@ const app = new Hono()
       const { projectId, prNumber } = c.req.param();
 
       try {
-        const project = await databases.getDocument<Project>(
-          DATABASE_ID,
-          PROJECTS_ID,
-          projectId
-        );
+        const { project, access } = await getProjectContext({
+          databases,
+          userId: user.$id,
+          projectId,
+        });
 
         if (!project) {
           return c.json({ error: "Project not found" }, 404);
         }
 
-        const isSuper = await isSuperAdmin({ databases, userId: user.$id });
-
-        if (!isSuper) {
-          const member = await getMember({
-            databases,
-            workspaceId: project.workspaceId,
-            userId: user.$id,
-          });
-
-          if (!member) {
-            return c.json({ error: "Unauthorized" }, 401);
-          }
+        if (!access.hasAccess) {
+          return c.json({ error: "Forbidden" }, 403);
         }
 
-        const tests = await databases.listDocuments<PersistedTestCase>(
+        const tests = await databases.listDocuments(
           DATABASE_ID,
           AI_TESTS_ID,
           [
@@ -462,7 +492,27 @@ const app = new Hono()
           ]
         );
 
-        return c.json({ data: tests.documents });
+        return c.json({
+          data: tests.documents.map((t) => ({
+            $id: t.$id,
+            $createdAt: t.$createdAt,
+            $updatedAt: t.$updatedAt,
+            id: t.$id,
+            projectId: t.projectId,
+            prNumber: t.prNumber,
+            scenarioId: t.scenarioId,
+            title: t.title,
+            description: t.description,
+            type: t.type,
+            prerequisites: t.prerequisites,
+            priority: t.priority,
+            reasoning: t.reasoning,
+            edgeCases: t.edgeCases,
+            isCustom: t.isCustom,
+            isDeleted: t.isDeleted,
+            status: t.status,
+          })),
+        });
       } catch (error) {
         console.error("Failed to fetch tests:", error);
         return c.json({ error: "Failed to fetch tests" }, 500);
@@ -476,9 +526,6 @@ const app = new Hono()
       title: z.string(),
       description: z.string(),
       type: z.nativeEnum(TestType),
-      targetFile: z.string(),
-      suggestedTestFile: z.string(),
-      testCode: z.string(),
       prerequisites: z.array(z.string()),
       priority: z.enum(["low", "medium", "high", "critical"]),
       reasoning: z.string(),
@@ -492,28 +539,18 @@ const app = new Hono()
       const testData = c.req.valid("json");
 
       try {
-        const project = await databases.getDocument<Project>(
-          DATABASE_ID,
-          PROJECTS_ID,
-          projectId
-        );
+        const { project, access } = await getProjectContext({
+          databases,
+          userId: user.$id,
+          projectId,
+        });
 
         if (!project) {
           return c.json({ error: "Project not found" }, 404);
         }
 
-        const isSuper = await isSuperAdmin({ databases, userId: user.$id });
-
-        if (!isSuper) {
-          const member = await getMember({
-            databases,
-            workspaceId: project.workspaceId,
-            userId: user.$id,
-          });
-
-          if (!member) {
-            return c.json({ error: "Unauthorized" }, 401);
-          }
+        if (!access.hasAccess) {
+          return c.json({ error: "Forbidden" }, 403);
         }
 
         const newTest = await databases.createDocument(
@@ -526,10 +563,31 @@ const app = new Hono()
             ...testData,
             isCustom: true,
             isDeleted: false,
+            status: TestStatus.UNTESTED,
           }
         );
 
-        return c.json({ data: newTest });
+        return c.json({
+          data: {
+            $id: newTest.$id,
+            $createdAt: newTest.$createdAt,
+            $updatedAt: newTest.$updatedAt,
+            id: newTest.$id,
+            projectId: newTest.projectId,
+            prNumber: newTest.prNumber,
+            scenarioId: newTest.scenarioId,
+            title: newTest.title,
+            description: newTest.description,
+            type: newTest.type,
+            prerequisites: newTest.prerequisites,
+            priority: newTest.priority,
+            reasoning: newTest.reasoning,
+            edgeCases: newTest.edgeCases,
+            isCustom: newTest.isCustom,
+            isDeleted: newTest.isDeleted,
+            status: newTest.status,
+          },
+        });
       } catch (error) {
         console.error("Failed to create test:", error);
         return c.json({ error: "Failed to create test" }, 500);
@@ -543,13 +601,11 @@ const app = new Hono()
       title: z.string().optional(),
       description: z.string().optional(),
       type: z.nativeEnum(TestType).optional(),
-      targetFile: z.string().optional(),
-      suggestedTestFile: z.string().optional(),
-      testCode: z.string().optional(),
       prerequisites: z.array(z.string()).optional(),
       priority: z.enum(["low", "medium", "high", "critical"]).optional(),
       reasoning: z.string().optional(),
       edgeCases: z.array(z.string()).optional(),
+      status: z.nativeEnum(TestStatus).optional(),
     })),
     async (c) => {
       const databases = c.get("databases");
@@ -558,7 +614,7 @@ const app = new Hono()
       const updates = c.req.valid("json");
 
       try {
-        const test = await databases.getDocument<PersistedTestCase>(
+        const test = await databases.getDocument(
           DATABASE_ID,
           AI_TESTS_ID,
           testId
@@ -568,28 +624,18 @@ const app = new Hono()
           return c.json({ error: "Test not found" }, 404);
         }
 
-        const project = await databases.getDocument<Project>(
-          DATABASE_ID,
-          PROJECTS_ID,
-          projectId
-        );
+        const { project, access } = await getProjectContext({
+          databases,
+          userId: user.$id,
+          projectId,
+        });
 
         if (!project) {
           return c.json({ error: "Project not found" }, 404);
         }
 
-        const isSuper = await isSuperAdmin({ databases, userId: user.$id });
-
-        if (!isSuper) {
-          const member = await getMember({
-            databases,
-            workspaceId: project.workspaceId,
-            userId: user.$id,
-          });
-
-          if (!member) {
-            return c.json({ error: "Unauthorized" }, 401);
-          }
+        if (!access.hasAccess) {
+          return c.json({ error: "Forbidden" }, 403);
         }
 
         const updatedTest = await databases.updateDocument(
@@ -599,7 +645,27 @@ const app = new Hono()
           updates
         );
 
-        return c.json({ data: updatedTest });
+        return c.json({
+          data: {
+            $id: updatedTest.$id,
+            $createdAt: updatedTest.$createdAt,
+            $updatedAt: updatedTest.$updatedAt,
+            id: updatedTest.$id,
+            projectId: updatedTest.projectId,
+            prNumber: updatedTest.prNumber,
+            scenarioId: updatedTest.scenarioId,
+            title: updatedTest.title,
+            description: updatedTest.description,
+            type: updatedTest.type,
+            prerequisites: updatedTest.prerequisites,
+            priority: updatedTest.priority,
+            reasoning: updatedTest.reasoning,
+            edgeCases: updatedTest.edgeCases,
+            isCustom: updatedTest.isCustom,
+            isDeleted: updatedTest.isDeleted,
+            status: updatedTest.status,
+          },
+        });
       } catch (error) {
         console.error("Failed to update test:", error);
         return c.json({ error: "Failed to update test" }, 500);
@@ -615,7 +681,7 @@ const app = new Hono()
       const { projectId, testId } = c.req.param();
 
       try {
-        const test = await databases.getDocument<PersistedTestCase>(
+        const test = await databases.getDocument(
           DATABASE_ID,
           AI_TESTS_ID,
           testId
@@ -625,28 +691,18 @@ const app = new Hono()
           return c.json({ error: "Test not found" }, 404);
         }
 
-        const project = await databases.getDocument<Project>(
-          DATABASE_ID,
-          PROJECTS_ID,
-          projectId
-        );
+        const { project, access } = await getProjectContext({
+          databases,
+          userId: user.$id,
+          projectId,
+        });
 
         if (!project) {
           return c.json({ error: "Project not found" }, 404);
         }
 
-        const isSuper = await isSuperAdmin({ databases, userId: user.$id });
-
-        if (!isSuper) {
-          const member = await getMember({
-            databases,
-            workspaceId: project.workspaceId,
-            userId: user.$id,
-          });
-
-          if (!member) {
-            return c.json({ error: "Unauthorized" }, 401);
-          }
+        if (!access.hasAccess) {
+          return c.json({ error: "Forbidden" }, 403);
         }
 
         await databases.deleteDocument(
@@ -883,13 +939,11 @@ async function persistGeneratedTests(
           title: testCase.title,
           description: testCase.description,
           type: testCase.type,
-          targetFile: testCase.targetFile,
-          suggestedTestFile: testCase.suggestedTestFile,
-          testCode: testCase.testCode,
           prerequisites: testCase.prerequisites,
           priority: testCase.priority,
           reasoning: testCase.reasoning,
           edgeCases: testCase.edgeCases,
+          status: TestStatus.UNTESTED,
           isCustom: false,
           isDeleted: false,
         }
