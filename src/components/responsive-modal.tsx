@@ -1,14 +1,17 @@
 import { PropsWithChildren } from "react";
-import { useMedia } from "react-use";
 import {
   Dialog,
   DialogContent,
-  DialogOverlay,
   DialogTitle,
   DialogDescription,
 } from "./ui/dialog";
-import { Drawer, DrawerContent, DrawerOverlay } from "./ui/drawer";
+import { cn } from "@/lib/utils";
 
+/**
+ * Single Radix Dialog for all breakpoints — avoids swapping to Vaul Drawer when
+ * viewport / `useMedia` updates, which could unmount dialogs mid-lifecycle and leave
+ * Radix body scroll/pointer lock stuck until a full refresh.
+ */
 export const ResponsiveModal = ({
   open,
   children,
@@ -19,27 +22,31 @@ export const ResponsiveModal = ({
   onOpenChange: (open: boolean) => void;
   title?: string;
 }>) => {
-  const isDesktop = useMedia("(min-width: 1024px)", true);
-  if (isDesktop) {
-    return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogOverlay className="bg-slate-950/25 backdrop-blur-md dark:bg-slate-950/55" />
-        <DialogContent className="hide-scrollbar max-h-[85vh] w-full overflow-y-auto border-none bg-background p-0 shadow-none dark:bg-[hsl(var(--surface-elevated))]/95 dark:shadow-[0_28px_65px_-34px_rgba(15,23,42,0.88)] sm:max-w-lg">
-          <DialogTitle hidden>{title}</DialogTitle>
-          <DialogDescription hidden>Modal dialog content</DialogDescription>
-          {children}
-        </DialogContent>
-      </Dialog>
-    );
-  }
+  const modalOverlayClass =
+    "bg-slate-950/25 backdrop-blur-md dark:bg-slate-950/55";
+
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerOverlay className="bg-slate-950/25 backdrop-blur-md dark:bg-slate-950/55" />
-      <DrawerContent>
-        <div className="hide-scrollbar max-h-[85vh] overflow-y-auto">
-          {children}
-        </div>
-      </DrawerContent>
-    </Drawer>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        overlayClassName={modalOverlayClass}
+        className={cn(
+          "hide-scrollbar gap-0 overflow-y-auto border-none bg-background p-0 shadow-none",
+          "dark:bg-[hsl(var(--surface-elevated))]/95 dark:shadow-[0_28px_65px_-34px_rgba(15,23,42,0.88)]",
+          "max-h-[min(85vh,90dvh)] w-full max-w-[calc(100vw-2rem)]",
+          // Desktop: centered modal
+          "lg:left-1/2 lg:top-1/2 lg:max-w-lg lg:translate-x-[-50%] lg:translate-y-[-50%] lg:rounded-[28px]",
+          // Mobile / tablet: bottom sheet (matches previous <lg Drawer behavior)
+          "max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:left-0 max-lg:right-0 max-lg:top-auto max-lg:translate-x-0 max-lg:translate-y-0 max-lg:max-h-[90dvh] max-lg:w-full max-lg:max-w-none max-lg:rounded-b-none max-lg:rounded-t-[28px]",
+        )}
+      >
+        <DialogTitle hidden>{title}</DialogTitle>
+        <DialogDescription hidden>Modal dialog content</DialogDescription>
+        <div
+          className="mx-auto mt-3 hidden h-2 w-[100px] shrink-0 rounded-full bg-muted max-lg:block"
+          aria-hidden
+        />
+        {children}
+      </DialogContent>
+    </Dialog>
   );
 };

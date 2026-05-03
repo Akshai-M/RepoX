@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   Select,
@@ -31,6 +32,14 @@ export const ProjectSwitcher = () => {
   const isCollapsed = state === "collapsed";
   const { data: projects } = useGetProjects({ workspaceId });
 
+  /** Valid controlled value only when URL has a project in the workspace list — avoids Radix Select breaking on /tasks etc. */
+  const selectedProjectId = useMemo(() => {
+    if (!projectId || !projects?.documents?.length) return undefined;
+    return projects.documents.some((p: Project) => p.$id === projectId)
+      ? projectId
+      : undefined;
+  }, [projectId, projects]);
+
   const onSelect = (id: string) => {
     router.push(`/workspaces/${workspaceId}/projects/${id}`);
   };
@@ -40,7 +49,7 @@ export const ProjectSwitcher = () => {
       typeof projects === "object" &&
       "documents" in projects &&
       Array.isArray(projects.documents)
-      ? projects.documents.find((p: Project) => p.$id === projectId)
+      ? projects.documents.find((p: Project) => p.$id === selectedProjectId)
       : null;
 
   if (isCollapsed) {
@@ -76,7 +85,11 @@ export const ProjectSwitcher = () => {
 
   return (
     <div className="flex flex-col gap-y-2">
-      <Select onValueChange={onSelect} value={projectId}>
+      <Select
+        key={workspaceId}
+        onValueChange={onSelect}
+        value={selectedProjectId}
+      >
         <SelectTrigger className="h-11 w-full rounded-2xl border-transparent bg-background/45 p-1 pl-3 font-medium shadow-sm backdrop-blur-sm">
           <SelectValue placeholder="Select a project" className="font-bold" />
         </SelectTrigger>
@@ -89,7 +102,7 @@ export const ProjectSwitcher = () => {
               <SelectItem
                 className={cn(
                   "m-0.5 rounded-xl py-2 hover:bg-accent",
-                  projectId === project.$id && "bg-accent",
+                  selectedProjectId === project.$id && "bg-accent",
                 )}
                 value={project.$id}
                 key={project.$id}

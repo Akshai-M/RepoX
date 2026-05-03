@@ -93,7 +93,8 @@ const SelectContent = React.forwardRef<
         className={cn(
           "p-1",
           position === "popper" &&
-            "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]"
+            /* Do not constrain viewport height to the trigger — that clips the menu and breaks item selection */
+            "w-full min-w-[var(--radix-select-trigger-width)]"
         )}
       >
         {children}
