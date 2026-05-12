@@ -10,7 +10,7 @@ const Footer = () => {
   ];
 
   const resourceLinks = [
-    { label: "Documentation", href: "#" },
+    { label: "Documentation", href: "/docs" },
     { label: "Blog", href: "https://medium.com/@prathyarti/vaiu-d9e33ef48464" },
     { label: "FAQ", href: "/faq" },
   ];

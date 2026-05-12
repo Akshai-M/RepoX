@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { PhoneCall, Video } from "lucide-react";
 import { useGetRooms } from "@/features/channels/api/use-get-rooms";
 import { useCreateRoomModal } from "@/features/channels/hooks/use-create-room-modal";
@@ -21,8 +21,14 @@ interface RoomSwitcherProps {
   workspaceId: string;
 }
 
+const roomHref = (
+  workspaceId: string,
+  projectId: string,
+  roomId: string,
+) =>
+  `/workspaces/${workspaceId}/projects/${projectId}/rooms/${roomId}`;
+
 export const RoomSwitcher = ({ projectId, workspaceId }: RoomSwitcherProps) => {
-  const router = useRouter();
   const pathname = usePathname();
   const { open } = useCreateRoomModal();
   const { data: rooms, isLoading } = useGetRooms({ workspaceId, projectId });
@@ -30,7 +36,7 @@ export const RoomSwitcher = ({ projectId, workspaceId }: RoomSwitcherProps) => {
   const isCollapsed = state === "collapsed";
 
   const currentRoomId = pathname.includes("/rooms/")
-    ? pathname.split("/rooms/")[1].split("?")[0]
+    ? pathname.split("/rooms/")[1]?.split("/")[0]?.split("?")[0]
     : undefined;
 
   const audioRooms = rooms?.documents.filter(
@@ -39,14 +45,6 @@ export const RoomSwitcher = ({ projectId, workspaceId }: RoomSwitcherProps) => {
   const videoRooms = rooms?.documents.filter(
     (room) => room.roomType === "VIDEO",
   );
-
-  const handleJoinRoom = (roomId: string, type: string) => {
-    setTimeout(() => {
-      router.push(
-        `/workspaces/${workspaceId}/projects/${projectId}/rooms/${roomId}?type=${type.toLowerCase()}`,
-      );
-    }, 100);
-  };
 
   if (isCollapsed) {
     return (
@@ -70,9 +68,18 @@ export const RoomSwitcher = ({ projectId, workspaceId }: RoomSwitcherProps) => {
                           currentRoomId === room.$id &&
                           "bg-sidebar-accent text-sidebar-accent-foreground",
                         )}
-                        onClick={() => handleJoinRoom(room.$id, "VIDEO")}
+                        asChild
                       >
-                        <Video className="h-6 w-6" />
+                        <Link
+                          href={roomHref(workspaceId, projectId, room.$id)}
+                          prefetch={false}
+                          aria-current={
+                            currentRoomId === room.$id ? "page" : undefined
+                          }
+                        >
+                          <Video className="h-6 w-6" />
+                          <span className="sr-only">{room.name} (video)</span>
+                        </Link>
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent side="right">
@@ -92,9 +99,18 @@ export const RoomSwitcher = ({ projectId, workspaceId }: RoomSwitcherProps) => {
                           currentRoomId === room.$id &&
                           "bg-sidebar-accent text-sidebar-accent-foreground",
                         )}
-                        onClick={() => handleJoinRoom(room.$id, "AUDIO")}
+                        asChild
                       >
-                        <PhoneCall className="h-6 w-6" />
+                        <Link
+                          href={roomHref(workspaceId, projectId, room.$id)}
+                          prefetch={false}
+                          aria-current={
+                            currentRoomId === room.$id ? "page" : undefined
+                          }
+                        >
+                          <PhoneCall className="h-6 w-6" />
+                          <span className="sr-only">{room.name} (audio)</span>
+                        </Link>
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent side="right">
@@ -132,10 +148,18 @@ export const RoomSwitcher = ({ projectId, workspaceId }: RoomSwitcherProps) => {
                     currentRoomId === room.$id &&
                     "bg-sidebar-accent text-sidebar-accent-foreground",
                   )}
-                  onClick={() => handleJoinRoom(room.$id, "VIDEO")}
+                  asChild
                 >
-                  <Video className="mr-2 h-3.5 w-3.5" />
-                  <span className="truncate">{room.name}</span>
+                  <Link
+                    href={roomHref(workspaceId, projectId, room.$id)}
+                    prefetch={false}
+                    aria-current={
+                      currentRoomId === room.$id ? "page" : undefined
+                    }
+                  >
+                    <Video className="mr-2 h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{room.name}</span>
+                  </Link>
                 </Button>
               ))}
             </div>
@@ -155,10 +179,18 @@ export const RoomSwitcher = ({ projectId, workspaceId }: RoomSwitcherProps) => {
                     currentRoomId === room.$id &&
                     "bg-sidebar-accent text-sidebar-accent-foreground",
                   )}
-                  onClick={() => handleJoinRoom(room.$id, "AUDIO")}
+                  asChild
                 >
-                  <PhoneCall className="mr-2 h-3.5 w-3.5" />
-                  <span className="truncate">{room.name}</span>
+                  <Link
+                    href={roomHref(workspaceId, projectId, room.$id)}
+                    prefetch={false}
+                    aria-current={
+                      currentRoomId === room.$id ? "page" : undefined
+                    }
+                  >
+                    <PhoneCall className="mr-2 h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{room.name}</span>
+                  </Link>
                 </Button>
               ))}
             </div>
@@ -171,6 +203,7 @@ export const RoomSwitcher = ({ projectId, workspaceId }: RoomSwitcherProps) => {
                   No rooms available
                 </p>
                 <Button
+                  type="button"
                   onClick={open}
                   variant="outline"
                   size="sm"
