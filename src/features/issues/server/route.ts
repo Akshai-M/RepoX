@@ -541,15 +541,32 @@ const app = new Hono()
         }
       }
 
-      // Require comment when moving to IN_REVIEW or DONE status
-      if (status === "IN_REVIEW" && !comment) {
-        return c.json(
-          { error: "Comment is required when moving issue to In Review" },
-          400,
-        );
+      // Require comment when moving to IN_REVIEW or DONE status.
+      // For IN_REVIEW, allow skipping a new comment if the issue already has comments (e.g. added from the issue thread).
+      if (status === "IN_REVIEW") {
+        const trimmed =
+          typeof comment === "string" && comment.trim().length > 0
+            ? comment.trim()
+            : null;
+        if (!trimmed) {
+          const existingComments = await databases.listDocuments(
+            DATABASE_ID,
+            COMMENTS_ID,
+            [Query.equal("issueId", issueId), Query.limit(1)],
+          );
+          if (existingComments.total === 0) {
+            return c.json(
+              { error: "Comment is required when moving issue to In Review" },
+              400,
+            );
+          }
+        }
       }
 
-      if (status === "DONE" && !comment) {
+      if (
+        status === "DONE" &&
+        !(typeof comment === "string" && comment.trim().length > 0)
+      ) {
         return c.json(
           { error: "Comment is required when moving issue to Done" },
           400,
@@ -557,9 +574,13 @@ const app = new Hono()
       }
 
       // Create comment when moving to IN_REVIEW or DONE
-      if ((status === "IN_REVIEW" || status === "DONE") && comment) {
+      if (
+        (status === "IN_REVIEW" || status === "DONE") &&
+        typeof comment === "string" &&
+        comment.trim().length > 0
+      ) {
         await databases.createDocument(DATABASE_ID, COMMENTS_ID, ID.unique(), {
-          text: comment,
+          text: comment.trim(),
           issueId,
           userId: user.$id,
         });
@@ -869,16 +890,23 @@ const app = new Hono()
           return c.json({ error: "Only Admin can move issue to Done" }, 403);
         }
 
-        // Note: Moving to IN_REVIEW doesn't require admin permissions, but it would require
-        // a comment in the individual PATCH route. Bulk update doesn't support comments.
+        // Kanban uses bulk-update (no transition comment in the payload). Allow the move
+        // if the issue already has at least one thread comment; otherwise require adding one first.
         if (isMovingToReview) {
-          return c.json(
-            {
-              error:
-                "Moving to In Review requires a comment. Please add a comment.",
-            },
-            400,
+          const existingComments = await databases.listDocuments(
+            DATABASE_ID,
+            COMMENTS_ID,
+            [Query.equal("issueId", existing.$id), Query.limit(1)],
           );
+          if (existingComments.total === 0) {
+            return c.json(
+              {
+                error:
+                  "Moving to In Review requires at least one comment on this issue. Open the issue, add a comment, then move the card again.",
+              },
+              400,
+            );
+          }
         }
 
         if (isMovingToDone && (isSuper || member?.role === "ADMIN") && existing.issueType === "github") {
