@@ -1,7 +1,7 @@
 "use client";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Loader2 } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 
 import { Separator } from "@/components/ui/separator";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +14,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 // import { DatePicker } from "@/components/date-picker";
 import {
@@ -102,22 +103,49 @@ export const CreateTaskForm = ({
                     <FormLabel>
                       Issue Type <span className="ml-0.5 text-red-500">*</span>
                     </FormLabel>
-                    <div className="grid grid-cols-2 gap-2">
-                      {(["vaiu", "github"] as const).map((t) => (
-                        <button
-                          key={t}
-                          type="button"
-                          onClick={() => field.onChange(t)}
-                          className={cn(
-                            "rounded-2xl border border-transparent px-4 py-3 text-sm font-medium transition-colors",
-                            field.value === t
-                              ? "border-primary bg-primary text-primary-foreground"
-                              : "bg-background/55 text-muted-foreground hover:bg-muted/70",
-                          )}
-                        >
-                          {t === "vaiu" ? "Vaiu Issue" : "Github Issue"}
-                        </button>
-                      ))}
+                    <div
+                      className="rounded-2xl border border-border/70 bg-muted/35 p-1.5 shadow-inner dark:bg-muted/25"
+                      role="radiogroup"
+                      aria-label="Issue type"
+                    >
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {(["vaiu", "github"] as const).map((t) => {
+                          const selected = field.value === t;
+                          const label =
+                            t === "vaiu" ? "Vaiu Issue" : "Github Issue";
+                          return (
+                            <button
+                              key={t}
+                              type="button"
+                              role="radio"
+                              aria-checked={selected}
+                              onClick={() => field.onChange(t)}
+                              className={cn(
+                                "relative flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
+                                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                                selected
+                                  ? "bg-background font-semibold text-foreground shadow-md ring-2 ring-primary/55 dark:bg-background/90"
+                                  : "text-muted-foreground hover:bg-background/40 hover:text-foreground",
+                              )}
+                            >
+                              <span
+                                className="flex size-4 shrink-0 items-center justify-center"
+                                aria-hidden
+                              >
+                                {selected ? (
+                                  <Check
+                                    className="size-4 text-primary"
+                                    strokeWidth={2.5}
+                                  />
+                                ) : null}
+                              </span>
+                              <span className="text-left leading-tight">
+                                {label}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                     <FormMessage />
                   </FormItem>
@@ -151,9 +179,11 @@ export const CreateTaskForm = ({
                       <span className="ml-0.5 text-red-500">*</span>
                     </FormLabel>
                     <FormControl>
-                      <Input
+                      <Textarea
                         {...field}
                         placeholder="Enter Description"
+                        rows={4}
+                        className="min-h-[100px] rounded-2xl border border-border/70 bg-background/50 px-3 py-2 text-sm shadow-none backdrop-blur-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 dark:border-border dark:bg-background/35"
                       />
                     </FormControl>
                     <FormMessage />
