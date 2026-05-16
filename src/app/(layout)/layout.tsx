@@ -21,7 +21,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
           <div className="px-3 pt-3 md:px-5 md:pt-5">
             {children}
           </div>
-          <div className="mt-12 px-3 md:px-5">
+          <div className="mt-6 px-3 md:mt-8 md:px-5">
             <Footer />
           </div>
         </main>

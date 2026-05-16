@@ -234,40 +234,68 @@ const AnalyticsOverview = ({ workspaceId }: { workspaceId: string }) => {
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         <AnalyticsCard
+          tone="total"
           title="Total Projects"
           value={projects?.total || 0}
-          variant="up"
-          increasedValue={0}
+          variant="neutral"
         />
         <AnalyticsCard
+          tone="assigned"
           title="Total Members"
           value={members?.total || 0}
-          variant="up"
-          increasedValue={0}
+          variant="neutral"
         />
         <AnalyticsCard
+          tone="total"
           title="Total Tasks"
           value={analytics.totalTaskCount}
-          variant={analytics.totalTaskCount > 0 ? "up" : "down"}
-          increasedValue={analytics.totalTaskCount}
+          variant={
+            analytics.taskDiff > 0
+              ? "up"
+              : analytics.taskDiff < 0
+                ? "down"
+                : "neutral"
+          }
+          badgeValue={`${analytics.taskDiff >= 0 ? "+" : ""}${analytics.taskDiff} vs LM`}
         />
         <AnalyticsCard
+          tone="completed"
           title="Completed Tasks"
           value={analytics.completedTaskCount}
-          variant={analytics.completeTaskDiff > 0 ? "up" : "down"}
-          increasedValue={analytics.completeTaskDiff}
+          variant={
+            analytics.completeTaskDiff > 0
+              ? "up"
+              : analytics.completeTaskDiff < 0
+                ? "down"
+                : "neutral"
+          }
+          badgeValue={`${analytics.completeTaskDiff >= 0 ? "+" : ""}${analytics.completeTaskDiff} vs LM`}
         />
         <AnalyticsCard
+          tone="overdue"
           title="Overdue Tasks"
           value={analytics.overdueTaskCount}
-          variant={analytics.overdueTaskDiff > 0 ? "down" : "up"}
-          increasedValue={analytics.overdueTaskDiff}
+          variant={
+            analytics.overdueTaskDiff > 0
+              ? "down"
+              : analytics.overdueTaskDiff < 0
+                ? "up"
+                : "neutral"
+          }
+          badgeValue={`${analytics.overdueTaskDiff >= 0 ? "+" : ""}${analytics.overdueTaskDiff} vs LM`}
         />
         <AnalyticsCard
+          tone="incomplete"
           title="Incomplete Tasks"
           value={analytics.incompleteTaskCount}
-          variant={analytics.incompleteTaskDiff > 0 ? "down" : "up"}
-          increasedValue={analytics.incompleteTaskDiff}
+          variant={
+            analytics.incompleteTaskDiff > 0
+              ? "down"
+              : analytics.incompleteTaskDiff < 0
+                ? "up"
+                : "neutral"
+          }
+          badgeValue={`${analytics.incompleteTaskDiff >= 0 ? "+" : ""}${analytics.incompleteTaskDiff} vs LM`}
         />
       </div>
 

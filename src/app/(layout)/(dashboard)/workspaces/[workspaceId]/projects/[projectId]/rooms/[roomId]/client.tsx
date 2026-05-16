@@ -73,7 +73,7 @@ export const RoomId = () => {
   }, [current]);
 
   useEffect(() => {
-    if (projectId === "undefined" || projectId === null) {
+    if (!projectId.trim() || projectId === "undefined") {
       toast.error("Please select your project to join the room");
       redirect(`/workspaces/${workspaceId}`);
     }

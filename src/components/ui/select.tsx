@@ -92,7 +92,7 @@ const SelectContent = React.forwardRef<
         className={cn(
           "max-h-[min(var(--radix-select-content-available-height),24rem)] overflow-y-auto overscroll-contain p-1",
           position === "popper" &&
-            "w-full min-w-[var(--radix-select-trigger-width)]"
+            "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]"
         )}
         onWheel={(event) => event.stopPropagation()}
         onTouchMove={(event) => event.stopPropagation()}

@@ -28,6 +28,13 @@ export const useConfirm = (
     setPromise(null);
   };
 
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      promise?.resolve(false);
+      handleClose();
+    }
+  };
+
   const handleCancel = () => {
     promise?.resolve(false);
     handleClose();
@@ -39,7 +46,7 @@ export const useConfirm = (
   };
 
   const ConfirmDialog = () => (
-    <ResponsiveModal open={promise !== null} onOpenChange={handleClose}>
+    <ResponsiveModal open={promise !== null} onOpenChange={handleOpenChange}>
       <Card className="size-full border-none bg-card shadow-none backdrop-blur-xl dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.05),transparent),hsl(var(--surface-elevated))] dark:shadow-[0_22px_55px_-35px_rgba(15,23,42,0.8)]">
         <CardContent className="pt-8">
           <CardHeader className="p-0">
