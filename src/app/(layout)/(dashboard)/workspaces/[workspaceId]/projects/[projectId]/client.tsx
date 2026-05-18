@@ -160,7 +160,7 @@ export const ProjectIdClient = () => {
     }
   }, [project]);
 
-  if (isLoading) return <Loader />;
+  if (isLoading) return <Loader variant="project" />;
   if (!project) return <PageError message="Project not found" />;
 
   return (
@@ -279,11 +279,7 @@ export const ProjectIdClient = () => {
       )}
 
       {/* Readme Display */}
-      {isLoading ? (
-        <div className="mt-4">
-          <Loader />
-        </div>
-      ) : readmeContent ? (
+      {readmeContent ? (
         <Card className="mt-2 overflow-hidden border-none bg-[linear-gradient(180deg,rgba(255,255,255,0.05),transparent),hsl(var(--card))] shadow-none dark:shadow-[0_22px_55px_-35px_rgba(15,23,42,0.75)]">
           <CardHeader className="flex flex-row items-center justify-between bg-background/10">
             <CardTitle>README</CardTitle>
