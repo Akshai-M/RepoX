@@ -5,9 +5,7 @@ import { Logo2 } from "@/components/Logo2";
 const CURRENT_YEAR = new Date().getFullYear();
 
 const Footer = () => {
-  const supportLinks = [
-    { label: "Contact", href: "/contact" },
-  ];
+  const supportLinks = [{ label: "Contact", href: "/contact" }];
 
   const resourceLinks = [
     { label: "Documentation", href: "/docs" },
@@ -38,19 +36,18 @@ const Footer = () => {
             </p>
           </div>
 
-          <div className="grid shrink-0 grid-cols-2 gap-x-8 gap-y-6 sm:grid-cols-3 sm:gap-x-10">
-
-            {/* Support Links */}
-            <div>
-              <h3 className="mb-2 text-sm font-semibold text-slate-900 dark:text-white">
+          <div className="flex flex-col gap-2">
+            {/* Support Links - Column 2 */}
+            <div className="flex space-x-4">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
                 Support
               </h3>
-              <nav className="space-y-2">
+              <nav className="flex space-x-4">
                 {supportLinks.map((link) => (
                   <Link
                     key={link.href}
                     href={link.href}
-                    className="block text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors font-medium"
+                    className="block text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
                   >
                     {link.label}
                   </Link>
@@ -70,54 +67,57 @@ const Footer = () => {
                     href={link.href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors font-medium group"
+                    className="group flex items-center gap-2 text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
                   >
                     {link.label}
                   </a>
                 ))}
                 <a
-                  href="mailto:contact@vaiu.com"
-                  className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors font-medium"
+                  href="mailto:contact.vaiuteam@gmail.com"
+                  className="flex items-center gap-2 text-sm font-medium text-slate-600 transition-colors hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400"
                 >
                   Email
                 </a>
               </nav>
             </div>
 
-            {/* Resources */}
-            <div className="col-span-2 sm:col-span-1">
-              <h3 className="mb-2 text-sm font-semibold text-slate-900 dark:text-white">
+            {/* Resources Links - Column 3 */}
+            <div className="flex space-x-4">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
                 Resources
               </h3>
-              <nav className="space-y-2">
+              <nav className="flex space-x-4">
                 {resourceLinks.map((link) => (
                   <Link
                     key={link.href}
                     href={link.href}
-                    className="block text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors font-medium"
+                    className="block text-sm font-medium text-slate-600 transition-colors hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
                   >
                     {link.label}
                   </Link>
                 ))}
               </nav>
             </div>
-
           </div>
         </div>
         {/* Divider */}
-        <div className="border-t border-slate-200 pt-4 dark:border-slate-800 md:pt-5">
-          <div className="flex flex-col items-center justify-between gap-3 text-xs text-slate-600 sm:flex-row sm:text-sm dark:text-slate-400">
+          <div className="flex px-14 flex-col items-center justify-between gap-3 text-sm text-slate-600 dark:text-slate-400 md:flex-row">
             <p>© {CURRENT_YEAR} Vaiu. All rights reserved.</p>
-            <div className="flex gap-6">
-              <Link href="/terms" className="hover:text-slate-900 dark:hover:text-white transition-colors">
+            <div className="flex pr-[62px] gap-6">
+              <Link
+                href="/terms"
+                className="transition-colors hover:text-slate-900 dark:hover:text-white"
+              >
                 Terms of Service
               </Link>
-              <Link href="/privacy" className="hover:text-slate-900 dark:hover:text-white transition-colors">
+              <Link
+                href="/privacy"
+                className="transition-colors hover:text-slate-900 dark:hover:text-white"
+              >
                 Privacy Policy
               </Link>
             </div>
           </div>
-        </div>
       </div>
     </footer>
   );

@@ -479,6 +479,30 @@ export const ProjectIdClient = () => {
           </Button>
         </Card>
       )}
+
+      <Tabs defaultValue="issues" className="w-full">
+        <TabsList className="h-11 w-full overflow-hidden rounded-2xl bg-background/45 p-1 backdrop-blur-sm lg:w-auto">
+          <TabsTrigger
+            value="issues"
+            className="h-9 w-full rounded-xl bg-transparent px-4 text-muted-foreground data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-none dark:data-[state=active]:shadow-sm lg:w-auto"
+          >
+            Issues
+          </TabsTrigger>
+          <TabsTrigger
+            value="pull-requests"
+            className="h-9 w-full rounded-xl bg-transparent px-4 text-muted-foreground data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-none dark:data-[state=active]:shadow-sm lg:w-auto"
+          >
+            Pull Requests
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="issues">
+          <TaskViewSwitcher hideProjectFilter />
+        </TabsContent>
+        <TabsContent value="pull-requests">
+          <PrViewSwitcher />
+        </TabsContent>
+      </Tabs>
+
     </div>
   );
 };
