@@ -1,7 +1,7 @@
 "use client";
 import { useCallback } from "react";
 import { useQueryState } from "nuqs";
-import { Loader, PlusIcon, RefreshCw } from "lucide-react";
+import { PlusIcon, RefreshCw } from "lucide-react";
 
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useWorkspaceId } from "@/features/workspaces/hooks/use-workspace-id";
 
 import { useProjectId } from "@/features/projects/hooks/use-projectId";
+import { useGetProject } from "@/features/projects/api/use-get-project";
 import { useCreateTaskModal } from "../hooks/use-create-task-modal";
 import { useTaskFilter } from "../hooks/use-task-filter";
 import { useGetIssues } from "../api/use-get-tasks";
@@ -22,6 +23,7 @@ import { IssueStatus } from "../types";
 import { useBulkUpdateTasks } from "../api/use-bulk-update-tasks";
 import { DataCalander } from "./data-calander";
 import { Button } from "@/components/ui/button";
+import { IssuesPrBoardSkeleton } from "@/components/loading-skeletons";
 
 interface TaskViewSwitcherProps {
   hideProjectFilter?: boolean;
@@ -38,6 +40,14 @@ export const TaskViewSwitcher = ({
   const { open } = useCreateTaskModal();
   const workspaceId = useWorkspaceId();
   const paramProjectId = useProjectId();
+  const { data: routeProject } = useGetProject({
+    projectId: paramProjectId ?? "",
+    enabled: Boolean(paramProjectId),
+  });
+  const showGithubSync =
+    Boolean(paramProjectId) &&
+    routeProject != null &&
+    routeProject.projectType !== "vaiu";
   const { mutate: bulkUpdate } = useBulkUpdateTasks();
   const { mutate: syncIssues, isPending: isSyncing } = useFetchIssues();
 
@@ -82,7 +92,7 @@ export const TaskViewSwitcher = ({
             Issues
           </p>
           <div className="flex items-center gap-2">
-            {paramProjectId && (
+            {showGithubSync && (
               <Button
                 size={"sm"}
                 onClick={handleSyncWithGitHub}
@@ -134,9 +144,7 @@ export const TaskViewSwitcher = ({
         <DataFilters hideProjectFilter={hideProjectFilter} />
         <Separator className="my-4" />
         {tasksLoading ? (
-          <div className="flex h-[200px] w-full flex-col items-center justify-center rounded-lg border">
-            <Loader className="size-5 animate-spin text-muted-foreground" />
-          </div>
+          <IssuesPrBoardSkeleton />
         ) : (
           <>
             <TabsContent value="table" className="mt-0">

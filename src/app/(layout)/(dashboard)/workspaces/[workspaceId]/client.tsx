@@ -17,6 +17,8 @@ import { useCreateTaskModal } from "@/features/issues/hooks/use-create-task-moda
 import { useCreateProjectModal } from "@/features/projects/hooks/use-create-project-modal";
 import { useGetWorkspaceAnalytics } from "@/features/workspaces/api/use-get-workspace-analytics";
 import { useGetWorkspace } from "@/features/workspaces/api/use-get-workspace";
+import { useCurrentWorkspaceMember } from "@/features/workspaces/api/use-is-member";
+import { MemberRole } from "@/features/members/types";
 import { Separator } from "@/components/ui/separator";
 import { SourceTypeBadge, WorkspaceTypeBadge } from "@/components/type-badge";
 
@@ -33,9 +35,14 @@ export const WorkspaceIdClient = () => {
     workspaceId,
   });
 
+  const { data: activeMember } = useCurrentWorkspaceMember(workspaceId);
+  const isWorkspaceAdmin =
+    activeMember?.role === MemberRole.ADMIN ||
+    activeMember?.role === MemberRole.SUPER_ADMIN;
+
   const isLoading = analyticsLoading || tasksLoading || projectsLoading;
 
-  if (isLoading) return <Loader />;
+  if (isLoading) return <Loader variant="workspace" />;
 
   if (!analytics || !tasks || !projects)
     return <PageError message="Failed to load workspace data" />;
@@ -72,15 +79,17 @@ export const WorkspaceIdClient = () => {
             Track what needs attention across your workspace at a glance.
           </p>
         </div>
-        <Button variant="outline" asChild>
-          <Link href={`/workspaces/${workspaceId}/analytics`}>
-            View Analytics
-          </Link>
-        </Button>
+        {isWorkspaceAdmin && (
+          <Button variant="outline" asChild>
+            <Link href={`/workspaces/${workspaceId}/analytics`}>
+              View Analytics
+            </Link>
+          </Button>
+        )}
       </div>
       <Analytics data={analytics} />
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <TaskList data={tasks.documents} total={tasks.total} />
+        {isWorkspaceAdmin && <TaskList data={tasks.documents} total={tasks.total} />}
         <ProjectList data={projects.documents} total={projects.total} />
       </div>
     </div>

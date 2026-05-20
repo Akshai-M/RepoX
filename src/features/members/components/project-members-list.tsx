@@ -23,6 +23,9 @@ import { useConfirm } from "@/hooks/use-confirm";
 import { useProjectId } from "@/features/projects/hooks/use-projectId";
 import { useGetProjectMembers } from "../api/use-get-project-members";
 import { useGetProject } from "@/features/projects/api/use-get-project";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useCurrentWorkspaceMember } from "@/features/workspaces/api/use-is-member";
+import { PageError } from "@/components/page-error";
 
 export const ProjectMembersList = () => {
   const workspaceId = useWorkspaceId();
@@ -38,12 +41,21 @@ export const ProjectMembersList = () => {
     projectId,
   });
   const { data: project } = useGetProject({ projectId });
-
-  const members = data?.documents ?? [];
-
+  const { data: currentWorkspaceMember } = useCurrentWorkspaceMember(workspaceId);
   const { mutate: removeProjectMember, isPending: removingMember } =
     useRemoveProjectMember();
   const { mutate: updateMember, isPending: updatingMember } = useUpdateMember();
+
+  const members = data?.documents ?? [];
+  const canManageMembers =
+    currentWorkspaceMember?.role === MemberRole.ADMIN ||
+    currentWorkspaceMember?.role === MemberRole.SUPER_ADMIN;
+
+  if (!isPending && !isError && !canManageMembers) {
+    return <PageError message="You do not have access to project members." />;
+  }
+
+  const isAdmin = canManageMembers;
 
   const handleUpdateMember = (memberId: string, role: MemberRole) => {
     updateMember({ param: { memberId }, json: { role } });
@@ -73,7 +85,21 @@ export const ProjectMembersList = () => {
       </div>
       <CardContent className="p-7">
         {isPending ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="flex items-center gap-3 border-b border-border/40 pb-3 last:border-0"
+              >
+                <Skeleton className="size-9 shrink-0 rounded-full" />
+                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <Skeleton className="h-4 w-36" />
+                  <Skeleton className="h-3 w-44 max-w-[85vw]" />
+                </div>
+                <Skeleton className="size-8 shrink-0 rounded-md" />
+              </div>
+            ))}
+          </div>
         ) : isError ? (
           <p className="text-sm text-destructive">Could not load members.</p>
         ) : members.length === 0 ? (
@@ -93,53 +119,57 @@ export const ProjectMembersList = () => {
                 <div className="flex flex-col">
                   <p className="text-sm font-medium">{member.name}</p>
                   <p className="text-xs font-medium">{member.email}</p>
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs font-semibold text-destructive">
-                      {member.role}
-                    </p>
-                    {isProjectAdmin && (
-                      <p className="rounded-md bg-yellow-100 px-2 py-1 text-xs font-semibold text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
-                        Project Admin
+                  {isAdmin && (
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-semibold text-destructive">
+                        {member.role}
                       </p>
-                    )}
-                  </div>
+                      {isProjectAdmin && (
+                        <p className="rounded-md bg-yellow-100 px-2 py-1 text-xs font-semibold text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
+                          Project Admin
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button className="ml-auto" variant="secondary" size="icon">
-                      <MoreVertical className="size-4 text-muted-foreground" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent side="bottom" align="end">
-                    <DropdownMenuItem
-                      className={`font-medium ${
-                        member.role === MemberRole.ADMIN && "hidden"
-                      }`}
-                      onClick={() =>
-                        handleUpdateMember(member.$id, MemberRole.ADMIN)
-                      }
-                      disabled={updatingMember}
-                    >
-                      Set as Administrator
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className="font-medium"
-                      onClick={() =>
-                        handleUpdateMember(member.$id, MemberRole.MEMBER)
-                      }
-                      disabled={updatingMember}
-                    >
-                      Set as Member
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className="font-medium text-amber-700"
-                      onClick={() => handleRemoveFromProject(member.$id)}
-                      disabled={removingMember}
-                    >
-                      Remove {member.name}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                {isAdmin && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button className="ml-auto" variant="secondary" size="icon">
+                        <MoreVertical className="size-4 text-muted-foreground" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent side="bottom" align="end">
+                      <DropdownMenuItem
+                        className={`font-medium ${
+                          member.role === MemberRole.ADMIN && "hidden"
+                        }`}
+                        onClick={() =>
+                          handleUpdateMember(member.$id, MemberRole.ADMIN)
+                        }
+                        disabled={updatingMember}
+                      >
+                        Set as Administrator
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="font-medium"
+                        onClick={() =>
+                          handleUpdateMember(member.$id, MemberRole.MEMBER)
+                        }
+                        disabled={updatingMember}
+                      >
+                        Set as Member
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="font-medium text-amber-700"
+                        onClick={() => handleRemoveFromProject(member.$id)}
+                        disabled={removingMember}
+                      >
+                        Remove {member.name}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
               </div>
               {idx < members.length - 1 && (
                 <Separator className="my-2.5 bg-neutral-400/40" />
