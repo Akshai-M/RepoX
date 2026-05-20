@@ -21,7 +21,7 @@ export default function TermsPage() {
                             1. Acceptance of Terms
                         </h2>
                         <p>
-                            Welcome to Vaiu ("we," "us," or "our"). These Terms of Service ("Terms") govern your access to and use of our website, mobile application, and related services (collectively, the "Service"). By accessing or using the Service, you agree to be bound by these Terms. If you do not agree to these Terms, you must not access or use the Service.
+                            Welcome to Vaiu (&ldquo;we,&rdquo; &ldquo;us,&rdquo; or &ldquo;our&rdquo;). These Terms of Service (&ldquo;Terms&rdquo;) govern your access to and use of our website, mobile application, and related services (collectively, the &ldquo;Service&rdquo;). By accessing or using the Service, you agree to be bound by these Terms. If you do not agree to these Terms, you must not access or use the Service.
                         </p>
                         <p>
                             These Terms constitute a legally binding agreement between you and Vaiu. We may update these Terms from time to time, and your continued use of the Service after any such changes constitutes your acceptance of the new Terms.
@@ -74,7 +74,7 @@ export default function TermsPage() {
                             The Service and its original content, features, and functionality are and will remain the exclusive property of Vaiu and its licensors. The Service is protected by copyright, trademark, and other laws. You may not reproduce, distribute, modify, or create derivative works of any part of the Service without our prior written consent.
                         </p>
                         <p>
-                            You retain ownership of the content you create or upload to the Service ("User Content"). By uploading User Content, you grant us a non-exclusive, royalty-free, worldwide license to use, display, and distribute your User Content in connection with the Service.
+                            You retain ownership of the content you create or upload to the Service (&ldquo;User Content&rdquo;). By uploading User Content, you grant us a non-exclusive, royalty-free, worldwide license to use, display, and distribute your User Content in connection with the Service.
                         </p>
                     </section>
 
@@ -104,7 +104,7 @@ export default function TermsPage() {
                             8. Disclaimers and Limitations of Liability
                         </h2>
                         <p>
-                            The Service is provided "as is" and "as available" without warranties of any kind, either express or implied, including but not limited to merchantability, fitness for a particular purpose, and non-infringement. We do not warrant that the Service will be uninterrupted, error-free, or secure.
+                            The Service is provided &ldquo;as is&rdquo; and &ldquo;as available&rdquo; without warranties of any kind, either express or implied, including but not limited to merchantability, fitness for a particular purpose, and non-infringement. We do not warrant that the Service will be uninterrupted, error-free, or secure.
                         </p>
                         <p>
                             In no event shall Vaiu, its directors, employees, or agents be liable for any indirect, incidental, special, consequential, or punitive damages arising out of or related to your use of the Service, even if we have been advised of the possibility of such damages.

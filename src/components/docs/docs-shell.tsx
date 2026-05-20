@@ -5,12 +5,12 @@ import { useEffect, useMemo, useState } from "react";
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import { ArrowLeft, BookOpenText, Clock3, Hash } from "lucide-react";
-import { useRouter } from "next/navigation";
 import remarkGfm from 'remark-gfm';
 
 import { Button } from "@/components/ui/button";
 import type { Doc, DocSummary } from "@/lib/docs";
 import { cn } from "@/lib/utils";
+import Image from "next/image";
 
 type DocsShellProps = {
     docs: DocSummary[];
@@ -148,12 +148,14 @@ const markdownComponents: Components = {
         </td>
     ),
     img: ({ src, alt }) => (
-        <img 
-            src={src} 
-            alt={alt} 
-            className="mt-6 max-w-full rounded-lg border border-border/50"
-        />
-    ),
+    <Image
+        src={src ?? ""}
+        alt={alt ?? ""}
+        width={800}
+        height={450}
+        className="mt-6 max-w-full rounded-lg border border-border/50"
+    />
+),
     del: ({ children }) => (
         <del className="line-through text-foreground/60">
             {children}
@@ -194,11 +196,10 @@ const getTextFromChildren = (children: React.ReactNode): string =>
         : typeof children === "string"
         ? children
         : children && typeof children === "object"
-        ? getTextFromChildren((children as any).props?.children)
+        ? getTextFromChildren((children as { props?: { children?: React.ReactNode } }).props?.children)
         : "";
 
 export const DocsShell = ({ docs, activeSlug, doc }: DocsShellProps) => {
-    const router = useRouter();
     const readingTime = Math.max(1, Math.ceil(doc.content.split(/\s+/).length / 220));
     const headings = useMemo(() => {
         const headingIds = new Map<string, number>();
