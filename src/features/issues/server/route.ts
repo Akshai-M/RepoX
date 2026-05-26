@@ -24,10 +24,13 @@ import {
   getAccessToken,
   getInstallationToken,
   getAuthenticatedUser,
-  listRepositoryIssues,
   updateIssue,
   createIssue,
+  getIssue,
+  listIssueComments,
+  createIssueComment,
 } from "@/lib/github-api";
+import { syncGithubIssueMetadata } from "./github-issue-import";
 
 const app = new Hono()
   .delete("/:issueId", sessionMiddleware, async (c) => {
@@ -168,7 +171,7 @@ const app = new Hono()
           const allProjects = await databases.listDocuments(
             DATABASE_ID,
             PROJECTS_ID,
-            [Query.equal("workspaceId", workspaceId)],
+            [Query.equal("workspaceId", workspaceId), Query.select(["$id"])],
           );
           accessibleProjectIds = allProjects.documents.map((project) => project.$id);
         } else {
@@ -180,7 +183,7 @@ const app = new Hono()
         const allProjects = await databases.listDocuments(
           DATABASE_ID,
           PROJECTS_ID,
-          [Query.equal("workspaceId", workspaceId)],
+          [Query.equal("workspaceId", workspaceId), Query.select(["$id"])],
         );
         accessibleProjectIds = allProjects.documents.map((project) => project.$id);
       }
@@ -354,6 +357,7 @@ const app = new Hono()
           [
             Query.equal("$id", projectId),
             Query.equal("workspaceId", workspaceId),
+            Query.select(["$id", "projectType"]),
           ],
         );
 
@@ -478,7 +482,7 @@ const app = new Hono()
           ID.unique(),
           {
             name,
-            description,
+            ...(issueType === "vaiu" && { description }),
             status,
             dueDate,
             workspaceId,
@@ -597,6 +601,57 @@ const app = new Hono()
         }
       }
 
+      const isGithubIssue = exisistingTask.issueType === "github";
+      const hasGithubUpdate = isGithubIssue && exisistingTask.number &&
+        (status !== undefined || description !== undefined);
+
+      // For GitHub issues, call GitHub FIRST, if it rejects the change we
+      // must not update Appwrite, so the two never go out of sync.
+      if (hasGithubUpdate) {
+        const project = await databases.getDocument<Project>(
+          DATABASE_ID,
+          PROJECTS_ID,
+          exisistingTask.projectId,
+        );
+
+        const githubToken = await getAccessToken(user.$id);
+
+        if (!githubToken) {
+          return c.json(
+            { error: "GitHub account not connected. Cannot update GitHub issue." },
+            400,
+          );
+        }
+
+        if (!project.owner) {
+          return c.json({ error: "Project is not linked to a GitHub repository." }, 400);
+        }
+
+        const githubUpdates: Record<string, unknown> = {};
+        if (status !== undefined) {
+          githubUpdates.state = status === "DONE" ? "closed" : "open";
+        }
+        if (description !== undefined) {
+          githubUpdates.body = description;
+        }
+
+        try {
+          await updateIssue(
+            githubToken,
+            project.owner,
+            project.name,
+            exisistingTask.number!,
+            githubUpdates as Parameters<typeof updateIssue>[4],
+          );
+        } catch (error) {
+          console.error("GitHub rejected the issue update:", error);
+          return c.json(
+            { error: "GitHub rejected the update. The issue was not changed." },
+            502,
+          );
+        }
+      }
+
       const issue = await databases.updateDocument<Issue>(
         DATABASE_ID,
         ISSUES_ID,
@@ -606,7 +661,7 @@ const app = new Hono()
           ...(status !== undefined && { status }),
           ...(dueDate !== undefined && { dueDate }),
           ...(projectId !== undefined && { projectId }),
-          ...(description !== undefined && { description }),
+          ...(!isGithubIssue && description !== undefined && { description }),
           ...(assigneeId !== undefined && {
             assigneeId:
               assigneeId === null || String(assigneeId).trim() === ""
@@ -615,34 +670,6 @@ const app = new Hono()
           }),
         },
       );
-
-      // Sync status changes to GitHub (only if status changed and issue is GitHub type)
-      if (status && issue.number && issue.issueType === "github") {
-        try {
-          const project = await databases.getDocument<Project>(
-            DATABASE_ID,
-            PROJECTS_ID,
-            issue.projectId,
-          );
-
-          // Write operation: use user OAuth token for proper attribution
-          const githubToken = await getAccessToken(user.$id);
-
-          if (githubToken && project.owner) {
-            const newState = status === "DONE" ? "closed" : "open";
-
-            await updateIssue(
-              githubToken,
-              project.owner,
-              project.name,
-              issue.number,
-              { state: newState },
-            );
-          }
-        } catch (error) {
-          console.error("Error syncing to GitHub:", error);
-        }
-      }
 
       return c.json({ data: issue });
     },
@@ -687,6 +714,27 @@ const app = new Hono()
       PROJECTS_ID,
       issue.projectId,
     );
+
+    let liveDescription: string | undefined;
+    if (issue.issueType === "github" && issue.number && project.owner) {
+      try {
+        const githubToken =
+          (await getInstallationToken(issue.workspaceId)) ||
+          (await getAccessToken(currentUser.$id)) ||
+          null;
+        if (githubToken) {
+          const ghIssue = await getIssue(
+            githubToken,
+            project.owner,
+            project.name,
+            issue.number,
+          );
+          liveDescription = ghIssue.body ?? "";
+        }
+      } catch (error) {
+        console.error("Failed to fetch GitHub issue body:", error);
+      }
+    }
 
     let assignee;
     // Check if assigneeId exists before trying to fetch
@@ -771,6 +819,7 @@ const app = new Hono()
     return c.json({
       data: {
         ...issue,
+        ...(liveDescription !== undefined && { description: liveDescription }),
         project,
         assignee,
       },
@@ -885,39 +934,36 @@ const app = new Hono()
           return c.json({ error: "Only Admin can move issue to Done" }, 403);
         }
 
-        if (isMovingToDone && (isSuper || member?.role === "ADMIN") && existing.issueType === "github") {
+        if (isMovingToDone && (isSuper || member?.role === "ADMIN") && existing.issueType === "github" && existing.number) {
           const project = await databases.getDocument<Project>(
             DATABASE_ID,
             PROJECTS_ID,
             existing.projectId,
           );
 
-          // Use installation token for the read; user token for the write
-          const readToken =
-            (await getInstallationToken(workspaceId)) ||
-            (await getAccessToken(user.$id));
           const writeToken = await getAccessToken(user.$id);
 
-          if (readToken && project.owner) {
-            const issuesFromGit = await listRepositoryIssues(
-              readToken,
-              project.owner,
-              project.name,
+          if (!writeToken) {
+            return c.json(
+              { error: "GitHub account not connected. Cannot close GitHub issue." },
+              400,
             );
+          }
 
-            const currentIssue = issuesFromGit.find(
-              (issue) => issue.title === existing.name,
+          if (!project.owner) {
+            return c.json({ error: "Project is not linked to a GitHub repository." }, 400);
+          }
+
+          try {
+            await updateIssue(writeToken, project.owner, project.name, existing.number, {
+              state: "closed",
+            });
+          } catch (error) {
+            console.error(`GitHub rejected closing issue #${existing.number}:`, error);
+            return c.json(
+              { error: `GitHub rejected closing issue #${existing.number}. No issues were updated.` },
+              502,
             );
-
-            if (currentIssue && writeToken) {
-              await updateIssue(
-                writeToken,
-                project.owner,
-                project.name,
-                currentIssue.number,
-                { state: "closed" },
-              );
-            }
           }
         }
       }
@@ -989,211 +1035,32 @@ const app = new Hono()
           }
         }
 
-        // Prefer installation token for reads; fall back to user OAuth token
+        // Prefer installation token, fall back to user OAuth token, then unauthenticated
+        // (unauthenticated still works for public repos, just at 60 req/hr rate limit)
         const githubToken =
           (await getInstallationToken(project.workspaceId)) ||
-          (await getAccessToken(user.$id));
+          (await getAccessToken(user.$id)) ||
+          null;
 
-        if (!githubToken) {
-          return c.json(
-            {
-              error: "GitHub not connected. Connect GitHub in workspace settings or sign in with GitHub.",
-            },
-            400,
-          );
-        }
-
-        const issuesFromGit = await listRepositoryIssues(
+        const summary = await syncGithubIssueMetadata({
+          databases,
           githubToken,
-          project.owner,
-          project.name,
-          "all", // Get both open and closed issues for sync
-        );
-
-        const issuesFromDb = await databases.listDocuments<Issue>(
-          DATABASE_ID,
-          ISSUES_ID,
-          [Query.equal("projectId", projectId)],
-        );
-
-        // Check for new issues to create (only open issues)
-        const openIssuesFromGit = issuesFromGit.filter(
-          (issue) => issue.state === "open",
-        );
-
-        const issuesToCreate = openIssuesFromGit.filter((gitIssue) => {
-          return !issuesFromDb.documents.some(
-            (dbIssue) =>
-              dbIssue.number === gitIssue.number ||
-              dbIssue.name === gitIssue.title,
-          );
+          owner: project.owner,
+          repo: project.name,
+          workspaceId: project.workspaceId,
+          projectId,
+          state: "all",
         });
-
-        // Check for status updates (GitHub issues that were closed should be marked as DONE)
-        const issuesToUpdate = issuesFromDb.documents.filter((dbIssue) => {
-          const gitIssue = issuesFromGit.find(
-            (issue) =>
-              issue.number === dbIssue.number || issue.title === dbIssue.name,
-          );
-
-          if (gitIssue) {
-            // Only update if GitHub issue is closed but DB issue is not DONE
-            if (
-              gitIssue.state === "closed" &&
-              dbIssue.status !== IssueStatus.DONE
-            ) {
-              return true;
-            }
-            // Only update if GitHub issue is reopened AND the DB issue was marked as DONE
-            // This prevents overwriting IN_PROGRESS, IN_REVIEW, etc.
-            if (
-              gitIssue.state === "open" &&
-              dbIssue.status === IssueStatus.DONE
-            ) {
-              return true;
-            }
-            // If DB issue is missing the number, update it (metadata only)
-            if (!dbIssue.number && gitIssue.number) {
-              return true;
-            }
-          }
-          return false;
-        });
-
-        // Update existing issues with status changes in batches
-        const UPDATE_BATCH_SIZE = 50;
-        const updatedIssues = [];
-
-        for (let i = 0; i < issuesToUpdate.length; i += UPDATE_BATCH_SIZE) {
-          const batch = issuesToUpdate.slice(i, i + UPDATE_BATCH_SIZE);
-
-          const batchResults = await Promise.all(
-            batch.map(async (dbIssue) => {
-              try {
-                const gitIssue = issuesFromGit.find(
-                  (issue) =>
-                    issue.number === dbIssue.number || issue.title === dbIssue.name,
-                );
-
-                if (gitIssue) {
-                  const updates: Partial<Issue> = {};
-
-                  // Only update status if GitHub is closed (DB → DONE)
-                  // OR if DB is DONE but GitHub reopened (DONE → TODO)
-                  if (
-                    gitIssue.state === "closed" &&
-                    dbIssue.status !== IssueStatus.DONE
-                  ) {
-                    updates.status = IssueStatus.DONE;
-                  } else if (
-                    gitIssue.state === "open" &&
-                    dbIssue.status === IssueStatus.DONE
-                  ) {
-                    // Reopened issue: revert from DONE to TODO only
-                    updates.status = IssueStatus.TODO;
-                  }
-
-                  // Update number if missing
-                  if (!dbIssue.number && gitIssue.number) {
-                    updates.number = gitIssue.number;
-                  }
-
-                  // Only update if there are changes
-                  if (Object.keys(updates).length > 0) {
-                    return databases.updateDocument(
-                      DATABASE_ID,
-                      ISSUES_ID,
-                      dbIssue.$id,
-                      updates,
-                    );
-                  }
-                }
-                return null;
-              } catch (error) {
-                console.error(`Failed to update issue ${dbIssue.$id}:`, error);
-                return null;
-              }
-            }),
-          );
-
-          updatedIssues.push(...batchResults.filter(Boolean));
-        }
-
-        // Helper function to find member by GitHub username
-        const findMemberByGithubUsername = async (githubUsername: string) => {
-          // For now, we'll just use the GitHub username as assigneeId
-          // In the future, this could be enhanced to match against user profiles
-          // that have GitHub usernames stored
-          return githubUsername;
-        };
-
-        // Create new issues in batches to avoid overwhelming the database
-        const CREATE_BATCH_SIZE = 50; // Process 50 issues at a time
-        const newIssues = [];
-
-        for (let i = 0; i < issuesToCreate.length; i += CREATE_BATCH_SIZE) {
-          const batch = issuesToCreate.slice(i, i + CREATE_BATCH_SIZE);
-
-          const batchResults = await Promise.all(
-            batch.map(async (issue) => {
-              try {
-                let assigneeId = null;
-                if (issue.assignee?.login) {
-                  assigneeId = await findMemberByGithubUsername(
-                    issue.assignee.login,
-                  );
-                }
-
-                // Re-check existence by projectId + number to avoid race duplicates
-                const existingWithNumber = await databases
-                  .listDocuments<Issue>(DATABASE_ID, ISSUES_ID, [
-                    Query.equal("projectId", projectId),
-                    Query.equal("number", issue.number),
-                  ])
-                  .catch(() => ({ documents: [] as Issue[] }));
-
-                if (existingWithNumber.documents.length > 0) {
-                  return existingWithNumber.documents[0];
-                }
-
-                // Set due date to 2 weeks from today for imported issues
-                const twoWeeksFromNow = new Date();
-                twoWeeksFromNow.setDate(twoWeeksFromNow.getDate() + 14);
-
-                return databases.createDocument(
-                  DATABASE_ID,
-                  ISSUES_ID,
-                  ID.unique(),
-                  {
-                    name: issue.title,
-                    description: issue.body || "",
-                    status: IssueStatus.TODO,
-                    dueDate: twoWeeksFromNow.toISOString(),
-                    workspaceId: project.workspaceId,
-                    projectId: projectId,
-                    assigneeId: assigneeId,
-                    position: 1000,
-                    number: issue.number,
-                  },
-                );
-              } catch (error) {
-                console.error(`Failed to create issue ${issue.number}:`, error);
-                return null; // Continue with other issues even if one fails
-              }
-            }),
-          );
-
-          newIssues.push(...batchResults.filter(Boolean));
-        }
 
         return c.json({
-          data: issuesFromGit,
-          created: newIssues.length,
-          updated: updatedIssues.filter(Boolean).length,
+          data: summary,
+          created: summary.created,
+          updated: summary.updated,
           summary: {
-            newIssues: newIssues.length,
-            updatedIssues: updatedIssues.filter(Boolean).length,
-            totalGitHubIssues: issuesFromGit.length,
+            newIssues: summary.created,
+            updatedIssues: summary.updated,
+            skippedIssues: summary.skipped,
+            totalGitHubIssues: summary.totalGitHubIssues,
           },
         });
       } catch (error) {
@@ -1204,8 +1071,53 @@ const app = new Hono()
   )
   .get("/:issueId/comments", sessionMiddleware, async (c) => {
     const databases = c.get("databases");
+    const user = c.get("user");
     const { issueId } = c.req.param();
 
+    const issue = await databases.getDocument<Issue>(DATABASE_ID, ISSUES_ID, issueId);
+
+    if (issue.issueType === "github" && issue.number) {
+      const project = await databases.getDocument<Project>(
+        DATABASE_ID,
+        PROJECTS_ID,
+        issue.projectId,
+      );
+
+      if (project.owner) {
+        try {
+          const githubToken =
+            (await getInstallationToken(issue.workspaceId)) ||
+            (await getAccessToken(user.$id)) ||
+            null;
+
+          if (githubToken) {
+            const ghComments = await listIssueComments(
+              githubToken,
+              project.owner,
+              project.name,
+              issue.number,
+            );
+
+            // Map GitHub comment shape to the shape the UI expects
+            const documents = ghComments.map((c) => ({
+              $id: String(c.id),
+              $createdAt: c.created_at,
+              issueId,
+              userId: c.user?.login ?? "unknown",
+              username: c.user?.login ?? "Unknown",
+              text: c.body ?? "",
+              attachment: undefined,
+            }));
+
+            return c.json({ data: { documents, total: documents.length } });
+          }
+        } catch (error) {
+          console.error("Failed to fetch GitHub comments:", error);
+        }
+      }
+    }
+
+    // Vaiu issues (or fallback): read from Appwrite
     const comments = await databases.listDocuments(DATABASE_ID, COMMENTS_ID, [
       Query.equal("issueId", issueId),
       Query.orderDesc("$createdAt"),
@@ -1226,6 +1138,60 @@ const app = new Hono()
         const { issueId } = c.req.param();
         const { text, attachment } = c.req.valid("json");
 
+        const issue = await databases.getDocument<Issue>(DATABASE_ID, ISSUES_ID, issueId);
+
+        // For GitHub issues, post the comment directly to GitHub
+        if (issue.issueType === "github" && issue.number) {
+          const project = await databases.getDocument<Project>(
+            DATABASE_ID,
+            PROJECTS_ID,
+            issue.projectId,
+          );
+
+          if (!project.owner) {
+            return c.json({ error: "Project is not linked to a GitHub repository." }, 400);
+          }
+
+          const githubToken = await getAccessToken(user.$id);
+          if (!githubToken) {
+            return c.json(
+              { error: "GitHub account not connected. Cannot post comment." },
+              400,
+            );
+          }
+
+          let commentBody = text;
+
+          // If there's an attachment, upload it to Appwrite storage and embed
+          // the URL as a markdown image in the GitHub comment body.
+          if (attachment instanceof File) {
+            const file = await storage.createFile(IMAGES_BUCKET_ID, ID.unique(), attachment);
+            const buffer: ArrayBuffer = await storage.getFilePreview(IMAGES_BUCKET_ID, file.$id);
+            const dataUrl = `data:image/png;base64,${Buffer.from(buffer).toString("base64")}`;
+            commentBody = `${text}\n\n![attachment](${dataUrl})`;
+          }
+
+          const ghComment = await createIssueComment(
+            githubToken,
+            project.owner,
+            project.name,
+            issue.number,
+            commentBody,
+          );
+
+          return c.json({
+            data: {
+              $id: String(ghComment.id),
+              $createdAt: ghComment.created_at,
+              issueId,
+              userId: user.$id,
+              username: user.name,
+              text,
+            },
+          });
+        }
+
+        // Vaiu issues: store comment in Appwrite
         let uploadedImage: string | undefined;
 
         if (attachment instanceof File) {

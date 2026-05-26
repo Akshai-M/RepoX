@@ -249,12 +249,12 @@ export async function addCollaborator(
  * List issues for a repository
  */
 export async function listRepositoryIssues(
-    accessToken: string,
+    accessToken: string | null,
     owner: string,
     repo: string,
     state?: "open" | "closed" | "all"
 ) {
-    const octokit = new Octokit({ auth: accessToken });
+    const octokit = new Octokit({ auth: accessToken ?? undefined });
 
     // Use pagination to fetch all issues (GitHub default is 30 per page, max is 100)
     const issues = await octokit.paginate(octokit.rest.issues.listForRepo, {
@@ -264,7 +264,31 @@ export async function listRepositoryIssues(
         per_page: 100, // Maximum allowed by GitHub API
     });
 
-    return issues;
+    return issues.filter((issue) => !issue.pull_request);
+}
+
+export async function listRepositoryIssuesPage(
+    accessToken: string | null,
+    owner: string,
+    repo: string,
+    state: "open" | "closed" | "all" = "open",
+    page: number = 1,
+    perPage: number = 100
+) {
+    const octokit = new Octokit({ auth: accessToken ?? undefined });
+
+    const { data } = await octokit.rest.issues.listForRepo({
+        owner,
+        repo,
+        state,
+        page,
+        per_page: perPage,
+    });
+
+    return {
+        issues: data.filter((issue) => !issue.pull_request),
+        hasNextPage: data.length === perPage,
+    };
 }
 
 /**
@@ -359,6 +383,25 @@ export async function listIssueComments(
     return comments;
 }
 
+export async function createIssueComment(
+    accessToken: string,
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    body: string
+) {
+    const octokit = new Octokit({ auth: accessToken });
+
+    const { data: comment } = await octokit.rest.issues.createComment({
+        owner,
+        repo,
+        issue_number: issueNumber,
+        body,
+    });
+
+    return comment;
+}
+
 /**
  * Add assignees to an issue
  */
@@ -387,14 +430,14 @@ export async function addIssueAssignees(
  * List pull requests for a repository
  */
 export async function listPullRequests(
-    accessToken: string,
+    accessToken: string | null,
     owner: string,
     repo: string,
     state: "open" | "closed" | "all" = "all",
     page: number = 1,
     perPage: number = 30
 ) {
-    const octokit = new Octokit({ auth: accessToken });
+    const octokit = new Octokit({ auth: accessToken ?? undefined });
 
     const { data: pullRequests } = await octokit.rest.pulls.list({
         owner,
